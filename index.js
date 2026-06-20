@@ -1,12 +1,12 @@
 const express = require('express');
 const cors = require('cors')
 const app = express()
-const port = process.env.PORT || 5000;
+const port = 5000
 require('dotenv').config()
 app.use(cors())
 app.use(express.json())
 
-const { MongoClient, ServerApiVersion } = require('mongodb');
+const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
 
 app.get('/', (req, res) => {
     res.send('Hello World!')
@@ -34,6 +34,76 @@ async function run() {
 
         const database = client.db('freelance_db');
         const tasksCollection = database.collection('tasks');
+        const usersCollection = database.collection('user');
+
+
+        // একটি নির্দিষ্ট আইডি দিয়ে সিঙ্গেল ফ্রিল্যান্সারের প্রোফাইল খোঁজার API
+        app.get("/api/freelancers/:id", async (req, res) => {
+            try {
+                const id = req.params.id;
+
+                // চেক করা আইডিটি মঙ্গোডিবি ObjectId ফরম্যাটে সঠিক কি না
+                if (!ObjectId.isValid(id)) {
+                    return res.status(400).send({ error: true, message: "Invalid Freelancer ID format" });
+                }
+
+                const query = { _id: new ObjectId(id), role: "freelancer" };
+                const freelancer = await usersCollection.findOne(query, {
+                    projection: { password: 0 } // নিরাপত্তার জন্য পাসওয়ার্ড বাদ দেওয়া হলো
+                });
+
+                if (!freelancer) {
+                    return res.status(404).send({ error: true, message: "Freelancer not found" });
+                }
+
+                res.send(freelancer);
+            } catch (error) {
+                console.error("Error fetching freelancer details:", error);
+                res.status(500).send({ error: true, message: "Internal server error" });
+            }
+        });
+
+        app.get("/api/freelancers", async (req, res) => {
+            try {
+                // ফিল্টার করছি যেখানে role হবে 'freelancer'
+                const query = { role: "freelancer" };
+
+                // ড্যাশবোর্ডে দেখানোর জন্য দরকারি ফিল্ডগুলো প্রোজেক্ট করতে পারেন (নিরাপত্তার জন্য পাসওয়ার্ড বাদ দিতে)
+                const freelancers = await usersCollection.find(query).project({
+                    password: 0, // পাসওয়ার্ড ফিল্ড থাকলে তা বাদ দেবে
+                }).toArray();
+
+                res.send(freelancers);
+            } catch (error) {
+                console.error("Error fetching freelancers:", error);
+                res.status(500).send({ error: true, message: "Internal server error" });
+            }
+        });
+
+
+        // একটি নির্দিষ্ট আইডি দিয়ে সিঙ্গেল টাস্ক খোঁজার API
+        app.get("/api/tasks/:id", async (req, res) => {
+            try {
+                const id = req.params.id;
+
+                // চেক করা আইডিটি মঙ্গোডিবি ফরম্যাটে সঠিক কি না
+                if (!ObjectId.isValid(id)) {
+                    return res.status(400).send({ error: true, message: "Invalid Task ID format" });
+                }
+
+                const query = { _id: new ObjectId(id) };
+                const task = await tasksCollection.findOne(query);
+
+                if (!task) {
+                    return res.status(404).send({ error: true, message: "Task not found" });
+                }
+
+                res.send(task);
+            } catch (error) {
+                console.error("Error fetching single task:", error);
+                res.status(500).send({ error: true, message: "Internal server error" });
+            }
+        });
 
         app.get("/api/my-tasks", async (req, res) => {
             const { clientId } = req.query;
@@ -110,10 +180,6 @@ run().catch(console.dir);
 
 
 
-if (process.env.NODE_ENV !== "production") {
-    app.listen(port, () => {
-        console.log(`Server running on port ${port}`);
-    });
-}
-
-module.exports = app;
+app.listen(port, () => {
+    console.log(`Example app listening on port ${port}`)
+})
