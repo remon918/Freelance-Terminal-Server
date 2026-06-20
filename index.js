@@ -63,6 +63,46 @@ async function run() {
             }
         });
 
+        
+
+        // ফ্রিল্যান্সার প্রোফাইল আপডেট করার API
+        app.put("/api/freelancers/:id", async (req, res) => {
+            try {
+                const id = req.params.id;
+                const updatedData = req.body;
+
+                // আইডি ফরম্যাট চেক
+                if (!ObjectId.isValid(id)) {
+                    return res.status(400).send({ error: true, message: "Invalid Freelancer ID format" });
+                }
+
+                const filter = { _id: new ObjectId(id) };
+
+                // মঙ্গোডিবির জন্য আপডেট অবজেক্ট তৈরি
+                const updateDoc = {
+                    $set: {
+                        name: updatedData.name,
+                        title: updatedData.title,
+                        image: updatedData.image,
+                        bio: updatedData.bio,
+                        skills: updatedData.skills,
+                        hourlyRate: Number(updatedData.hourlyRate), // স্কিল অ্যারে
+                    },
+                };
+
+                const result = await usersCollection.updateOne(filter, updateDoc);
+
+                if (result.matchedCount === 0) {
+                    return res.status(404).send({ error: true, message: "Freelancer not found" });
+                }
+
+                res.send({ success: true, message: "Profile updated successfully" });
+            } catch (error) {
+                console.error("Error updating freelancer profile:", error);
+                res.status(500).send({ error: true, message: "Internal server error" });
+            }
+        });
+
         app.get("/api/freelancers", async (req, res) => {
             try {
                 // ফিল্টার করছি যেখানে role হবে 'freelancer'
