@@ -348,6 +348,8 @@ async function run() {
             }
         });
 
+        
+
         app.get("/api/freelancers/:id", async (req, res) => {
             try {
                 const id = req.params.id;
@@ -854,7 +856,7 @@ async function run() {
                 });
             }
         });
-        
+
 
         
         app.get("/api/freelancer-projects", async (req, res) => {
