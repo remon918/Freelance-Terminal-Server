@@ -42,6 +42,7 @@ async function run() {
                 res.status(500).json({ success: false, message: "Internal server error" });
             }
         });
+        
 
         app.patch("/api/admin/users/:id/status", async (req, res) => {
             try {
@@ -119,7 +120,6 @@ async function run() {
             }
         });
 
-        // ২. কোনো নির্দিষ্ট টাস্ক ডিলিট করার API
         app.delete("/api/admin/tasks/:id", async (req, res) => {
             try {
                 const { id } = req.params;
@@ -348,7 +348,7 @@ async function run() {
             }
         });
 
-        
+
 
         app.get("/api/freelancers/:id", async (req, res) => {
             try {
