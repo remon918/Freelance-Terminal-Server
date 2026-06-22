@@ -369,7 +369,7 @@ async function run() {
         });
 
 
-        
+
 
         app.put("/api/freelancers/:id", async (req, res) => {
             try {
@@ -453,6 +453,8 @@ async function run() {
                 res.status(500).send({ error: true, message: "Internal server error" });
             }
         });
+
+
 
         app.get("/api/tasks/:id", async (req, res) => {
             try {
@@ -852,8 +854,9 @@ async function run() {
                 });
             }
         });
+        
 
-        // ১. ফ্রিল্যান্সারের একটিভ এবং কমপ্লিটেড প্রজেক্টগুলো গেট করার এপিআই
+        
         app.get("/api/freelancer-projects", async (req, res) => {
             try {
                 const { email } = req.query;
@@ -882,7 +885,6 @@ async function run() {
             }
         });
 
-        // ২. ডেলিভারেবল লিঙ্ক সাবমিট এবং টাস্ক কমপ্লিট করার এপিআই
         app.patch("/api/tasks/complete/:id", async (req, res) => {
             try {
                 const { id } = req.params;
