@@ -12,10 +12,7 @@ app.get('/', (req, res) => {
     res.send('Hello World!')
 })
 
-
-
 const uri = process.env.MONGODB_URI;
-
 // Create a MongoClient with a MongoClientOptions object to set the Stable API version
 const client = new MongoClient(uri, {
     serverApi: {
@@ -29,33 +26,343 @@ async function run() {
     try {
         // Connect the client to the server	(optional starting in v4.7)
         await client.connect();
-
-
-
         const database = client.db('freelance_db');
         const tasksCollection = database.collection('tasks');
         const usersCollection = database.collection('user');
+        const paymentCollection = database.collection("payment")
 
 
-        // একটি নির্দিষ্ট আইডি দিয়ে সিঙ্গেল ফ্রিল্যান্সারের প্রোফাইল খোঁজার API
+        // ১. সব ইউজারদের ডাটা নিয়ে আসার API (Admin এর জন্য)
+        app.get("/api/admin/users", async (req, res) => {
+            try {
+                // এখানে সব ইউজার ব্যাক করবে (সিকিউরিটির জন্য পাসওয়ার্ড বাদ দেওয়া হয়েছে)
+                const users = await usersCollection.find({}, { projection: { password: 0 } }).toArray();
+                res.status(200).json({ success: true, users });
+            } catch (error) {
+                console.error("Error fetching admin users:", error);
+                res.status(500).json({ success: false, message: "Internal server error" });
+            }
+        });
+
+        // ২. ইউজারের স্ট্যাটাস (Active/Blocked) আপডেট করার API
+        app.patch("/api/admin/users/:id/status", async (req, res) => {
+            try {
+                const { id } = req.params;
+                const { status } = req.body; // ফ্রন্টএন্ড থেকে 'Active' অথবা 'Blocked' আসবে
+
+                if (!ObjectId.isValid(id)) {
+                    return res.status(400).json({ success: false, message: "Invalid User ID format" });
+                }
+
+                if (!status || (status !== "Active" && status !== "Blocked")) {
+                    return res.status(400).json({ success: false, message: "Invalid status value" });
+                }
+
+                const filter = { _id: new ObjectId(id) };
+                const updateDoc = {
+                    $set: {
+                        status: status // ডাটাবেজে ইউজারের স্ট্যাটাস আপডেট হবে
+                    }
+                };
+
+                const result = await usersCollection.updateOne(filter, updateDoc);
+
+                if (result.matchedCount === 0) {
+                    return res.status(404).json({ success: false, message: "User not found" });
+                }
+
+                res.status(200).json({ success: true, message: `User status updated to ${status}` });
+            } catch (error) {
+                console.error("Error updating user status:", error);
+                res.status(500).json({ success: false, message: "Internal server error" });
+            }
+        });
+
+        app.get("/api/admin/tasks", async (req, res) => {
+            try {
+                // সরাসরি কালেকশন থেকে সব টাস্ক খুঁজে নেওয়া (কোনো ডুপ্লিকেট তৈরি হবে না)
+                const tasks = await tasksCollection.find({}).sort({ createdAt: -1 }).toArray();
+
+                // ফ্রন্টএন্ড ড্রপডাউন এবং টেবিলের ফিল্ডের সাথে ডেটা মেলানো
+                const formattedTasks = tasks.map(task => {
+                    // ১. ক্যাটাগরি ম্যাপিং সেফটি (UI/UX Design বা Design যাই থাকুক, ড্রপডাউনের সাথে মিলানো)
+                    let cleanCategory = task.category ? String(task.category).trim() : "Other";
+                    const lowerCat = cleanCategory.toLowerCase();
+
+                    if (lowerCat.includes("dev") || lowerCat.includes("web") || lowerCat.includes("soft")) {
+                        cleanCategory = "Development";
+                    } else if (lowerCat.includes("design") || lowerCat.includes("ui") || lowerCat.includes("ux")) {
+                        cleanCategory = "Design";
+                    } else if (lowerCat.includes("writ") || lowerCat.includes("content")) {
+                        cleanCategory = "Writing";
+                    } else if (lowerCat.includes("market") || lowerCat.includes("seo") || lowerCat.includes("ads")) {
+                        cleanCategory = "Marketing";
+                    } else {
+                        cleanCategory = "Other";
+                    }
+
+                    return {
+                        _id: task._id,
+                        title: task.title,
+                        category: cleanCategory,
+                        budget: task.budget,
+                        status: task.status ? String(task.status).trim() : "Open",
+                        proposals: task.proposals, // প্রপোজাল অ্যারে সরাসরি পাস করা হলো
+                        createdAt: task.createdAt,
+                        // আপনার ডেটাবেজের client_email কে ফ্রন্টএন্ডের clientEmail এ ম্যাপ করা হলো
+                        clientEmail: task.client_email || "no-email@domain.com"
+                    };
+                });
+
+                res.status(200).json({ success: true, tasks: formattedTasks });
+            } catch (error) {
+                console.error("Error fetching tasks:", error);
+                res.status(500).json({ success: false, message: "Internal server error" });
+            }
+        });
+
+        // ২. কোনো নির্দিষ্ট টাস্ক ডিলিট করার API
+        app.delete("/api/admin/tasks/:id", async (req, res) => {
+            try {
+                const { id } = req.params;
+                if (!ObjectId.isValid(id)) {
+                    return res.status(400).json({ success: false, message: "Invalid Task ID" });
+                }
+
+                const result = await tasksCollection.deleteOne({ _id: new ObjectId(id) });
+
+                if (result.deletedCount === 0) {
+                    return res.status(404).json({ success: false, message: "Task not found" });
+                }
+
+                res.status(200).json({ success: true, message: "Task deleted successfully" });
+            } catch (error) {
+                console.error("Error deleting task:", error);
+                res.status(500).json({ success: false, message: "Internal server error" });
+            }
+        });
+
+        app.post("/api/payment", async (req, res) => {
+            try {
+                const { sessionId, userId, userEmail, priceId, taskId, proposalId } = req.body;
+
+                if (!sessionId || !taskId) {
+                    return res.status(400).json({ success: false, msg: "Missing required fields" });
+                }
+
+                const isExist = await paymentCollection.findOne({ sessionId });
+                if (isExist) {
+                    return res.status(400).json({ success: false, msg: "Already Exist!" });
+                }
+
+                if (!ObjectId.isValid(taskId)) {
+                    return res.status(400).json({ success: false, msg: "Invalid Task ID format" });
+                }
+
+                await paymentCollection.insertOne({
+                    sessionId,
+                    userEmail,
+                    userId,
+                    priceId,
+                    taskId: new ObjectId(taskId), // ObjectId তে কনভার্ট করে সেভ করুন
+                    proposalId: proposalId && ObjectId.isValid(proposalId) ? new ObjectId(proposalId) : proposalId,
+                    createdAt: new Date()
+                });
+
+                const filter = { _id: new ObjectId(taskId) };
+                let updateDoc = {};
+                let options = {};
+
+                if (proposalId && ObjectId.isValid(proposalId)) {
+                    updateDoc = {
+                        $set: {
+                            status: "Accepted",
+                            // নির্দিষ্ট প্রপোজালটি Accepted হবে
+                            "proposals.$[elem].status": "Accepted",
+                            // বাকি সব 'Pending' প্রপোজাল অটোমেটিক 'Rejected' হয়ে যাবে
+                            "proposals.$[other].status": "Rejected"
+                        }
+                    };
+                    options = {
+                        arrayFilters: [
+                            { "elem.proposalId": new ObjectId(proposalId) },
+                            { "other.proposalId": { $ne: new ObjectId(proposalId) }, "other.status": "Pending" }
+                        ]
+                    };
+                } else {
+                    updateDoc = { $set: { status: "Accepted" } };
+                }
+
+                const result = await tasksCollection.updateOne(filter, updateDoc, options);
+
+                if (result.matchedCount === 0) {
+                    return res.status(404).json({ success: false, msg: "Task not found!" });
+                }
+
+                res.status(200).json({ success: true, msg: "Status updated globally across the website!" });
+
+            } catch (error) {
+                console.error("Global Payment API Error:", error);
+                res.status(500).json({ success: false, message: "Internal server error" });
+            }
+        });
+
+        app.get("/api/payment-history", async (req, res) => {
+            try {
+                const { email } = req.query;
+                if (!email) {
+                    return res.status(400).send({ success: false, message: "Client email is required" });
+                }
+
+                const paymentData = await paymentCollection.aggregate([
+                    { $match: { userEmail: email } },
+                    {
+                        $addFields: {
+                            taskObjectId: {
+                                $cond: {
+                                    if: { $eq: [{ $type: "$taskId" }, "string"] },
+                                    then: { $toObjectId: "$taskId" },
+                                    else: "$taskId"
+                                }
+                            }
+                        }
+                    },
+                    {
+                        $lookup: {
+                            from: "tasks",
+                            localField: "taskObjectId",
+                            foreignField: "_id",
+                            as: "taskDetails"
+                        }
+                    },
+                    { $unwind: { path: "$taskDetails", preserveNullAndEmptyArrays: true } },
+                    { $sort: { createdAt: -1 } },
+                    {
+                        $facet: {
+                            history: [
+                                {
+                                    $project: {
+                                        _id: 1,
+                                        sessionId: 1,
+                                        createdAt: 1,
+                                        taskTitle: { $ifNull: ["$taskDetails.title", "Unknown Task"] },
+                                        amount: { $ifNull: ["$taskDetails.budget", 0] }
+                                    }
+                                }
+                            ],
+                            totalSpend: [
+                                {
+                                    $group: {
+                                        _id: null,
+                                        total: { $sum: { $ifNull: ["$taskDetails.budget", 0] } }
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                ]).toArray();
+
+                const history = paymentData[0]?.history || [];
+                const totalSpend = paymentData[0]?.totalSpend[0]?.total || 0;
+
+                res.status(200).send({ success: true, history, totalSpend });
+            } catch (error) {
+                console.error("Error fetching payment history:", error);
+                res.status(500).send({ success: false, message: "Internal server error" });
+            }
+        });
+
+        app.get("/api/freelancer-earnings", async (req, res) => {
+            try {
+                const { email } = req.query;
+                if (!email) {
+                    return res.status(400).send({ success: false, message: "Freelancer email is required" });
+                }
+
+                console.log("Processing earnings for freelancer:", email);
+
+                // ১. কালেকশন থেকে সব ডাটা রিড করি
+                const allPayments = await paymentCollection.find({}).toArray();
+                const allTasks = await tasksCollection.find({}).toArray();
+
+                const history = [];
+                let totalEarned = 0;
+
+                const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+                const monthlyChartData = months.map(m => ({ month: m, earnings: 0 }));
+
+                // ২. লুপ চালিয়ে ডাটা ফিল্টার ও ম্যাচিং
+                allTasks.forEach(task => {
+                    // চেক করি এই টাস্কের proposals অ্যারেতে এই ফ্রিল্যান্সারের কোনো প্রোপোজাল আছে কি না
+                    const hasFreelancerProposal = task.proposals && task.proposals.some(prop =>
+                        prop.freelancerEmail?.toLowerCase() === email.toLowerCase() ||
+                        prop.email?.toLowerCase() === email.toLowerCase()
+                    );
+
+                    if (hasFreelancerProposal) {
+                        // এই টাস্কের ক্লায়েন্টের ইমেইল দিয়ে পেমেন্ট কালেকশনে কোনো পেমেন্ট আছে কি না খুঁজি
+                        const matchedPayment = allPayments.find(payment =>
+                            payment.userEmail?.toLowerCase() === task.client_email?.toLowerCase()
+                        );
+
+                        // যদি পেমেন্ট পাওয়া যায় (তার মানে ক্লায়েন্ট অলরেডি পে করেছে)
+                        if (matchedPayment) {
+                            const amount = Number(task.budget) || 0;
+                            totalEarned += amount;
+
+                            // চার্টের জন্য মাস ক্যালকুলেশন
+                            const paymentDate = matchedPayment.createdAt ? new Date(matchedPayment.createdAt) : new Date();
+                            const monthIndex = paymentDate.getMonth();
+                            if (monthIndex >= 0 && monthIndex < 12) {
+                                monthlyChartData[monthIndex].earnings += amount;
+                            }
+
+                            // হিস্ট্রি টেবিলের জন্য ডাটা ফরম্যাটিং
+                            history.push({
+                                _id: matchedPayment._id,
+                                sessionId: matchedPayment.sessionId,
+                                createdAt: matchedPayment.createdAt || task.createdAt,
+                                clientEmail: task.client_email || "N/A",
+                                taskTitle: task.title || "Untitled Task",
+                                amount: amount
+                            });
+                        }
+                    }
+                });
+
+                const paymentCount = history.length;
+                const avgEarned = paymentCount > 0 ? Math.round(totalEarned / paymentCount) : 0;
+
+                console.log(`Matched ${paymentCount} successfully paid tasks for freelancer.`);
+
+                res.status(200).send({
+                    success: true,
+                    totalEarned,
+                    avgEarned,
+                    paymentCount,
+                    monthlyChartData,
+                    history
+                });
+
+            } catch (error) {
+                console.error("Error in freelancer earnings:", error);
+                res.status(500).send({ success: false, message: error.message });
+            }
+        });
+
         app.get("/api/freelancers/:id", async (req, res) => {
             try {
                 const id = req.params.id;
-
-                // চেক করা আইডিটি মঙ্গোডিবি ObjectId ফরম্যাটে সঠিক কি না
                 if (!ObjectId.isValid(id)) {
                     return res.status(400).send({ error: true, message: "Invalid Freelancer ID format" });
                 }
-
                 const query = { _id: new ObjectId(id), role: "freelancer" };
                 const freelancer = await usersCollection.findOne(query, {
-                    projection: { password: 0 } // নিরাপত্তার জন্য পাসওয়ার্ড বাদ দেওয়া হলো
+                    projection: { password: 0 }
                 });
-
                 if (!freelancer) {
                     return res.status(404).send({ error: true, message: "Freelancer not found" });
                 }
-
                 res.send(freelancer);
             } catch (error) {
                 console.error("Error fetching freelancer details:", error);
@@ -63,22 +370,14 @@ async function run() {
             }
         });
 
-
-
-        // ফ্রিল্যান্সার প্রোফাইল আপডেট করার API
         app.put("/api/freelancers/:id", async (req, res) => {
             try {
                 const id = req.params.id;
                 const updatedData = req.body;
-
-                // আইডি ফরম্যাট চেক
                 if (!ObjectId.isValid(id)) {
                     return res.status(400).send({ error: true, message: "Invalid Freelancer ID format" });
                 }
-
                 const filter = { _id: new ObjectId(id) };
-
-                // মঙ্গোডিবির জন্য আপডেট অবজেক্ট তৈরি
                 const updateDoc = {
                     $set: {
                         name: updatedData.name,
@@ -89,13 +388,10 @@ async function run() {
                         hourlyRate: Number(updatedData.hourlyRate),
                     },
                 };
-
                 const result = await usersCollection.updateOne(filter, updateDoc);
-
                 if (result.matchedCount === 0) {
                     return res.status(404).send({ error: true, message: "Freelancer not found" });
                 }
-
                 res.send({ success: true, message: "Profile updated successfully" });
             } catch (error) {
                 console.error("Error updating freelancer profile:", error);
@@ -106,35 +402,25 @@ async function run() {
         app.get("/api/freelancers", async (req, res) => {
             try {
                 const { search, minRate, maxRate, page, limit } = req.query;
-
-                // পেজিনেশন ডিফল্ট ভ্যালু (১ পেজে ১২ জন ফ্রিল্যান্সার)
                 const currentPage = parseInt(page) || 1;
                 const currentLimit = parseInt(limit) || 12;
                 const skip = (currentPage - 1) * currentLimit;
-
-                // প্রাথমিক কোয়েরি (শুধু ফ্রিল্যান্সারদের নিবে)
                 const query = { role: "freelancer" };
-
-                // ১. সার্চ ফিল্টার (Name, Title বা Skills-এর মধ্যে খুঁজবে)
                 if (search) {
                     query.$or = [
                         { name: { $regex: search, $options: "i" } },
                         { title: { $regex: search, $options: "i" } },
-                        { skills: { $regex: search, $options: "i" } } // অ্যারে বা স্ট্রিং দুটাই হ্যান্ডেল করবে
+                        { skills: { $regex: search, $options: "i" } }
                     ];
                 }
-
-                // ২. আওয়ার্লি রেট ফিল্টার
                 if (minRate || maxRate) {
                     query.hourlyRate = {};
                     if (minRate) query.hourlyRate.$gte = Number(minRate);
                     if (maxRate) query.hourlyRate.$lte = Number(maxRate);
                 }
-
-                // ডাটা এবং টোটাল কাউন্ট একবারে আনার জন্য এগ্রিগেশন
                 const pipeline = [
                     { $match: query },
-                    { $project: { password: 0 } }, // পাসওয়ার্ড বাদ দেওয়া হলো
+                    { $project: { password: 0 } },
                     {
                         $facet: {
                             data: [
@@ -147,7 +433,6 @@ async function run() {
                         }
                     }
                 ];
-
                 const aggregationResult = await usersCollection.aggregate(pipeline).toArray();
 
                 const freelancers = aggregationResult[0].data;
@@ -168,9 +453,6 @@ async function run() {
             }
         });
 
-
-        // একটি নির্দিষ্ট আইডি দিয়ে সিঙ্গেল টাস্ক খোঁজার API
-        // একটি নির্দিষ্ট আইডি দিয়ে সিঙ্গেল টাস্ক খোঁজার API (রিজেক্টেড প্রপোজাল ফিল্টারসহ)
         app.get("/api/tasks/:id", async (req, res) => {
             try {
                 const id = req.params.id;
@@ -178,8 +460,6 @@ async function run() {
                 if (!ObjectId.isValid(id)) {
                     return res.status(400).send({ error: true, message: "Invalid Task ID format" });
                 }
-
-                // এগ্রিগেশন ব্যবহার করে টাস্কের ভেতর থেকে Rejected প্রপোজালগুলো বাদ দেওয়া হচ্ছে
                 const taskArray = await tasksCollection.aggregate([
                     { $match: { _id: new ObjectId(id) } },
                     {
@@ -192,7 +472,6 @@ async function run() {
                             status: 1,
                             clientId: 1,
                             client_email: 1,
-                            // 🔥 এই লজিকটি কেবল "status !== Rejected" প্রপোজালগুলোকে রাখবে
                             proposals: {
                                 $filter: {
                                     input: { $ifNull: ["$proposals", []] },
@@ -203,19 +482,15 @@ async function run() {
                         }
                     }
                 ]).toArray();
-
                 if (!taskArray || taskArray.length === 0) {
                     return res.status(404).send({ error: true, message: "Task not found" });
                 }
-
-                // এগ্রিগেশন সবসময় অ্যারে দেয়, তাই ১ম এলিমেন্টটি অবজেক্ট আকারে পাঠানো হলো
                 res.send(taskArray[0]);
             } catch (error) {
                 console.error("Error fetching single task:", error);
                 res.status(500).send({ error: true, message: "Internal server error" });
             }
         });
-
 
         app.delete("/api/tasks/:id", async (req, res) => {
             try {
@@ -227,29 +502,24 @@ async function run() {
                         message: "Invalid Task ID",
                     });
                 }
-
                 const existingTask = await tasksCollection.findOne({
                     _id: new ObjectId(id),
                 });
-
                 if (!existingTask) {
                     return res.status(404).send({
                         success: false,
                         message: "Task not found",
                     });
                 }
-
                 if (existingTask.status !== "open") {
                     return res.status(403).send({
                         success: false,
                         message: "Only open tasks can be deleted",
                     });
                 }
-
                 const result = await tasksCollection.deleteOne({
                     _id: new ObjectId(id),
                 });
-
                 res.send({
                     success: true,
                     result,
@@ -264,37 +534,31 @@ async function run() {
             }
         });
 
-
         app.put("/api/tasks/:id", async (req, res) => {
             try {
                 const { id } = req.params;
                 const updatedTask = req.body;
-
                 if (!ObjectId.isValid(id)) {
                     return res.status(400).send({
                         success: false,
                         message: "Invalid Task ID",
                     });
                 }
-
                 const existingTask = await tasksCollection.findOne({
                     _id: new ObjectId(id),
                 });
-
                 if (!existingTask) {
                     return res.status(404).send({
                         success: false,
                         message: "Task not found",
                     });
                 }
-
                 if (existingTask.status !== "open") {
                     return res.status(403).send({
                         success: false,
                         message: "Only open tasks can be edited",
                     });
                 }
-
                 const result = await tasksCollection.updateOne(
                     {
                         _id: new ObjectId(id),
@@ -309,7 +573,6 @@ async function run() {
                         },
                     }
                 );
-
                 res.send({
                     success: true,
                     result,
@@ -324,61 +587,43 @@ async function run() {
             }
         });
 
-
         app.get("/api/my-tasks", async (req, res) => {
             const { clientId } = req.query;
-
             if (!clientId) {
                 return res.status(400).send({
                     message: "clientId is required",
                 });
             }
-
             const tasks = await tasksCollection.find({
                 clientId,
             }).toArray();
-
             res.send(tasks);
         });
 
         app.get("/api/tasks", async (req, res) => {
             try {
                 const { status, search, category, minBudget, maxBudget, page, limit } = req.query;
-
-                // পেজিনেশন ডিফল্ট ভ্যালু সেটআপ
                 const currentPage = parseInt(page) || 1;
-                const currentLimit = parseInt(limit) || 6; // প্রতি পেজে ৬টা করে টাস্ক দেখাবে
+                const currentLimit = parseInt(limit) || 6;
                 const skip = (currentPage - 1) * currentLimit;
-
-                // প্রাথমিক কোয়েরি অবজেক্ট
                 const query = {};
-
-                // ১. স্ট্যাটাস ফিল্টার (যেমন: open)
                 if (status) {
                     query.status = status;
                 }
-
-                // ২. সার্চ ফিল্টার (Title এবং Description দুইটার মধ্যেই খুঁজবে)
                 if (search) {
                     query.$or = [
                         { title: { $regex: search, $options: "i" } },
                         { description: { $regex: search, $options: "i" } }
                     ];
                 }
-
-                // ৩. ক্যাটাগরি ফিল্টার
                 if (category) {
                     query.category = category;
                 }
-
-                // ৪. বাজেট রেঞ্জ ফিল্টার (Min & Max range দিয়ে)
                 if (minBudget || maxBudget) {
                     query.budget = {};
                     if (minBudget) query.budget.$gte = Number(minBudget);
                     if (maxBudget) query.budget.$lte = Number(maxBudget);
                 }
-
-                // ৫. এগ্রিগেশন পাইপলাইন তৈরি (ফিল্টারিং + Rejected প্রপোজাল বাদ দেওয়া + পেজিনেশন)
                 const pipeline = [
                     { $match: query },
                     {
@@ -392,7 +637,6 @@ async function run() {
                             clientId: 1,
                             client_email: 1,
                             createdAt: 1,
-                            // কেবল "status !== Rejected" প্রপোজালগুলোকে রাখবে
                             proposals: {
                                 $filter: {
                                     input: { $ifNull: ["$proposals", []] },
@@ -402,7 +646,7 @@ async function run() {
                             }
                         }
                     },
-                    { $sort: { createdAt: -1 } }, // নতুন টাস্ক আগে দেখাবে
+                    { $sort: { createdAt: -1 } },
                     {
                         $facet: {
                             data: [
@@ -422,7 +666,6 @@ async function run() {
                 const totalResults = aggregationResult[0].totalCount[0]?.count || 0;
                 const totalPages = Math.ceil(totalResults / currentLimit);
 
-                // রেসপন্স অবজেক্ট পাঠানো
                 res.send({
                     success: true,
                     tasks,
@@ -453,15 +696,11 @@ async function run() {
                         message: "Task already exists",
                     });
                 }
-
-                // ফ্রন্টএন্ড থেকে proposals না আসলেও ব্যাকএন্ড নিশ্চিত করবে যেন এটি একটি empty array হয়
                 const finalTaskData = {
                     ...task,
                     proposals: task.proposals || []
                 };
-
                 const result = await tasksCollection.insertOne(finalTaskData);
-
                 res.status(201).send({
                     success: true,
                     insertedId: result.insertedId,
@@ -475,8 +714,6 @@ async function run() {
             }
         });
 
-
-
         app.get("/api/my-proposals", async (req, res) => {
             try {
                 const { email } = req.query;
@@ -484,9 +721,7 @@ async function run() {
                 if (!email) {
                     return res.status(400).send({ error: true, message: "Freelancer email is required" });
                 }
-
                 const proposals = await tasksCollection.aggregate([
-                    // ১. শুধু ফ্রিল্যান্সারের ইমেইল ম্যাচ করো (রিজেক্টেড ফিল্টার বাদ দেওয়া হলো)
                     { $match: { "proposals.freelancerEmail": email } },
                     { $unwind: "$proposals" },
                     { $match: { "proposals.freelancerEmail": email } },
@@ -502,7 +737,7 @@ async function run() {
                             proposedBudget: "$proposals.proposedBudget",
                             estimatedDays: "$proposals.estimatedDays",
                             coverNote: "$proposals.coverNote",
-                            status: "$proposals.status", // এখানে "Rejected" স্ট্যাটাস চলে আসবে
+                            status: "$proposals.status",
                             createdAt: "$proposals.createdAt"
                         }
                     },
@@ -516,13 +751,9 @@ async function run() {
             }
         });
 
-
-
         app.post("/api/proposals", async (req, res) => {
             try {
                 const { taskId, proposedBudget, estimatedDays, coverNote, freelancerEmail } = req.body;
-
-                // নতুন প্রপোজাল অবজেক্ট তৈরি
                 const newProposal = {
                     proposalId: new ObjectId(),
                     freelancerEmail: freelancerEmail || "qisykapa@mailinator.com",
@@ -532,54 +763,39 @@ async function run() {
                     status: "Pending",
                     createdAt: new Date()
                 };
-
                 const filter = { _id: new ObjectId(taskId) };
-
-                // $push ব্যবহার করায় এটি সরাসরি ডেটাবেজের proposals অ্যারেতে ঢুকে যাবে
                 const updateDoc = {
                     $push: { proposals: newProposal }
                 };
-
                 const result = await tasksCollection.updateOne(filter, updateDoc);
-
                 res.status(201).send({ success: true, message: "Proposal submitted successfully", data: newProposal });
             } catch (error) {
                 res.status(500).send({ error: true, message: "Internal server error" });
             }
         });
 
-        // ৪. নির্দিষ্ট প্রপোজালের স্ট্যাটাস আপডেট করার API (Reject/Accept এর জন্য)
         app.put("/api/proposals/:taskId/:proposalId", async (req, res) => {
             try {
                 const { taskId, proposalId } = req.params;
-                const { status } = req.body; // ফ্রন্টএন্ড থেকে পাঠানো হবে { "status": "Rejected" }
-
-                // আইডিগুলোর ফরম্যাট ভ্যালিডেশন চেক
+                const { status } = req.body;
                 if (!ObjectId.isValid(taskId) || !ObjectId.isValid(proposalId)) {
                     return res.status(400).send({ error: true, message: "Invalid Task ID or Proposal ID format" });
                 }
-
                 if (!status) {
                     return res.status(400).send({ error: true, message: "Status is required" });
                 }
-
-                // টাস্ক আইডি এবং তার ভেতরের নির্দিষ্ট প্রপোজাল আইডি ম্যাচ করার ফিল্টার
                 const filter = {
                     _id: new ObjectId(taskId),
                     "proposals.proposalId": new ObjectId(proposalId)
                 };
-
-                // মঙ্গোডিবির পজিশনাল অপারেটর ($) দিয়ে নির্দিষ্ট প্রপোজালের স্ট্যাটাস আপডেট
                 const updateDoc = {
                     $set: { "proposals.$.status": status }
                 };
-
                 const result = await tasksCollection.updateOne(filter, updateDoc);
 
                 if (result.matchedCount === 0) {
                     return res.status(404).send({ error: true, message: "Task or Proposal not found" });
                 }
-
                 res.status(200).send({ success: true, message: `Proposal status updated to ${status}` });
             } catch (error) {
                 console.error("Error updating proposal status:", error);
@@ -587,31 +803,19 @@ async function run() {
             }
         });
 
-        // ৫. নির্দিষ্ট প্রপোজালের আইডি দিয়ে তার ডিটেইলস (এবং টাস্কের টাইটেল) খোঁজার API
         app.get("/api/proposals/details/:proposalId", async (req, res) => {
             try {
                 const { proposalId } = req.params;
-
-                // আইডি ফরম্যাট চেক
                 if (!ObjectId.isValid(proposalId)) {
                     return res.status(400).send({
                         success: false,
                         message: "Invalid Proposal ID format"
                     });
                 }
-
-                // মঙ্গোডিবি এগ্রিগেশন পাইপলাইন
                 const proposalData = await tasksCollection.aggregate([
-                    // ১. ওই টাস্কটি খুঁজে বের করো যার ভেতরে এই proposalId-টি আছে
                     { $match: { "proposals.proposalId": new ObjectId(proposalId) } },
-
-                    // ২. proposals অ্যারেটিকে ভেঙ্গে সিঙ্গেল অবজেক্টে রূপান্তর করো
                     { $unwind: "$proposals" },
-
-                    // ৩. এবার ভেঙ্গে যাওয়া অবজেক্টগুলো থেকে নিখুঁতভাবে আইডি ম্যাচ করো
                     { $match: { "proposals.proposalId": new ObjectId(proposalId) } },
-
-                    // ৪. ফ্রন্টএন্ডের সুবিধার জন্য ডাটা স্ট্রাকচার সুন্দর করে সাজিয়ে নাও (Project)
                     {
                         $project: {
                             _id: 0,
@@ -629,21 +833,16 @@ async function run() {
                         }
                     }
                 ]).toArray();
-
-                // যদি কোনো ডাটা খুঁজে না পাওয়া যায়
                 if (!proposalData || proposalData.length === 0) {
                     return res.status(404).send({
                         success: false,
                         message: "Proposal not found"
                     });
                 }
-
-                // এগ্রিগেশন সবসময় অ্যারে দেয়, তাই ১ম এলিমেন্টটি অবজেক্ট আকারে রেসপন্স পাঠানো হলো
                 res.status(200).send({
                     success: true,
                     data: proposalData[0]
                 });
-
             } catch (error) {
                 console.error("Error fetching single proposal details:", error);
                 res.status(500).send({
@@ -653,9 +852,71 @@ async function run() {
             }
         });
 
+        // ১. ফ্রিল্যান্সারের একটিভ এবং কমপ্লিটেড প্রজেক্টগুলো গেট করার এপিআই
+        app.get("/api/freelancer-projects", async (req, res) => {
+            try {
+                const { email } = req.query;
+                if (!email) {
+                    return res.status(400).send({ success: false, message: "Freelancer email is required" });
+                }
+
+                // টাস্ক কালেকশন থেকে ডাটা ফিল্টার করা
+                const projects = await tasksCollection.find({
+                    "proposals.freelancerEmail": email,
+                    status: { $in: ["Accepted", "Completed"] } // শুধু Accepted এবং Completed গুলো নিব
+                }).toArray();
+
+                // ফ্রন্টএন্ডের সুবিধার জন্য Accepted এবং Completed আলাদা করে পাঠানো
+                const activeProjects = projects.filter(task => task.status === "Accepted");
+                const completedProjects = projects.filter(task => task.status === "Completed");
+
+                res.status(200).send({
+                    success: true,
+                    activeProjects,
+                    completedProjects
+                });
+            } catch (error) {
+                console.error("Error fetching freelancer projects:", error);
+                res.status(500).send({ success: false, message: "Internal server error" });
+            }
+        });
+
+        // ২. ডেলিভারেবল লিঙ্ক সাবমিট এবং টাস্ক কমপ্লিট করার এপিআই
+        app.patch("/api/tasks/complete/:id", async (req, res) => {
+            try {
+                const { id } = req.params;
+                const { deliverableUrl } = req.body;
+
+                if (!ObjectId.isValid(id)) {
+                    return res.status(400).send({ success: false, message: "Invalid Task ID format" });
+                }
+                if (!deliverableUrl) {
+                    return res.status(400).send({ success: false, message: "Deliverable URL is required" });
+                }
+
+                const filter = { _id: new ObjectId(id) };
+                const updateDoc = {
+                    $set: {
+                        status: "Completed",
+                        deliverableUrl: deliverableUrl, // লিঙ্কটি টাস্ক অবজেক্টে সেভ হবে
+                        completedAt: new Date()
+                    }
+                };
+
+                const result = await tasksCollection.updateOne(filter, updateDoc);
+
+                if (result.matchedCount === 0) {
+                    return res.status(404).send({ success: false, message: "Task not found" });
+                }
+
+                res.status(200).send({ success: true, message: "Task marked as completed successfully!" });
+            } catch (error) {
+                console.error("Error completing task:", error);
+                res.status(500).send({ success: false, message: "Internal server error" });
+            }
+        });
 
 
-        // Send a ping to confirm a successful connection
         await client.db("admin").command({ ping: 1 });
         console.log("Pinged your deployment. You successfully connected to MongoDB!");
     } finally {
