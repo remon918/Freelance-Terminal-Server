@@ -32,7 +32,6 @@ async function run() {
         const paymentCollection = database.collection("payment")
 
 
-        // ১. সব ইউজারদের ডাটা নিয়ে আসার API (Admin এর জন্য)
         app.get("/api/admin/users", async (req, res) => {
             try {
                 // এখানে সব ইউজার ব্যাক করবে (সিকিউরিটির জন্য পাসওয়ার্ড বাদ দেওয়া হয়েছে)
@@ -43,9 +42,7 @@ async function run() {
                 res.status(500).json({ success: false, message: "Internal server error" });
             }
         });
-        
 
-        // ২. ইউজারের স্ট্যাটাস (Active/Blocked) আপডেট করার API
         app.patch("/api/admin/users/:id/status", async (req, res) => {
             try {
                 const { id } = req.params;
@@ -370,6 +367,9 @@ async function run() {
                 res.status(500).send({ error: true, message: "Internal server error" });
             }
         });
+
+
+        
 
         app.put("/api/freelancers/:id", async (req, res) => {
             try {
