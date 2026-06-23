@@ -456,6 +456,112 @@ async function run() {
             }
         });
 
+        // ১. নির্দিষ্ট ক্লায়েন্টের প্রোফাইল ডেটা রিড করা
+        app.get("/api/clients/:id", async (req, res) => {
+            try {
+                const id = req.params.id;
+                if (!ObjectId.isValid(id)) {
+                    return res.status(400).send({ error: true, message: "Invalid Client ID format" });
+                }
+
+                const query = { _id: new ObjectId(id), role: "client" };
+                const clientData = await usersCollection.findOne(query, {
+                    projection: { password: 0 }
+                });
+
+                if (!clientData) {
+                    return res.status(404).send({ error: true, message: "Client not found" });
+                }
+                res.send(clientData);
+            } catch (error) {
+                console.error("Error fetching client details:", error);
+                res.status(500).send({ error: true, message: "Internal server error" });
+            }
+        });
+
+        // ২. ক্লায়েন্টের প্রোফাইল আপডেট করা
+        app.put("/api/clients/:id", async (req, res) => {
+            try {
+                const id = req.params.id;
+                const updatedData = req.body;
+                if (!ObjectId.isValid(id)) {
+                    return res.status(400).send({ error: true, message: "Invalid Client ID format" });
+                }
+
+                const filter = { _id: new ObjectId(id) };
+                const updateDoc = {
+                    $set: {
+                        name: updatedData.name,
+                        image: updatedData.image,
+                        bio: updatedData.bio || "", // ক্লায়েন্ট বায়ো (যদি থাকে)
+                        company: updatedData.company || "", // কোম্পানির নাম (ঐচ্ছিক)
+                    },
+                };
+
+                const result = await usersCollection.updateOne(filter, updateDoc);
+                if (result.matchedCount === 0) {
+                    return res.status(404).send({ error: true, message: "Client not found" });
+                }
+                res.send({ success: true, message: "Client profile updated successfully" });
+            } catch (error) {
+                console.error("Error updating client profile:", error);
+                res.status(500).send({ error: true, message: "Internal server error" });
+            }
+        });
+
+        // ১. নির্দিষ্ট অ্যাডমিনের প্রোফাইল ডেটা রিড করা
+        app.get("/api/admins/:id", async (req, res) => {
+            try {
+                const id = req.params.id;
+                if (!ObjectId.isValid(id)) {
+                    return res.status(400).send({ error: true, message: "Invalid Admin ID format" });
+                }
+
+                const query = { _id: new ObjectId(id), role: "admin" };
+                const adminData = await usersCollection.findOne(query, {
+                    projection: { password: 0 }
+                });
+
+                if (!adminData) {
+                    return res.status(404).send({ error: true, message: "Admin not found" });
+                }
+                res.send(adminData);
+            } catch (error) {
+                console.error("Error fetching admin details:", error);
+                res.status(500).send({ error: true, message: "Internal server error" });
+            }
+        });
+
+        // ২. অ্যাডমিনের প্রোফাইল ডেটা আপডেট করা
+        app.put("/api/admins/:id", async (req, res) => {
+            try {
+                const id = req.params.id;
+                const updatedData = req.body;
+                if (!ObjectId.isValid(id)) {
+                    return res.status(400).send({ error: true, message: "Invalid Admin ID format" });
+                }
+
+                const filter = { _id: new ObjectId(id), role: "admin" };
+                const updateDoc = {
+                    $set: {
+                        name: updatedData.name,
+                        image: updatedData.image,
+                        bio: updatedData.bio || "",       // অ্যাডমিন ডেসক্রিপশন / সামারি
+                        title: updatedData.title || "System Administrator", // পজিশন বা টাইটেল
+                    },
+                };
+
+                const result = await usersCollection.updateOne(filter, updateDoc);
+                if (result.matchedCount === 0) {
+                    return res.status(404).send({ error: true, message: "Admin not found" });
+                }
+                res.send({ success: true, message: "Admin profile updated successfully" });
+            } catch (error) {
+                console.error("Error updating admin profile:", error);
+                res.status(500).send({ error: true, message: "Internal server error" });
+            }
+        });
+
 
 
         app.get("/api/tasks/:id", async (req, res) => {
@@ -858,7 +964,7 @@ async function run() {
         });
 
 
-        
+
         app.get("/api/freelancer-projects", async (req, res) => {
             try {
                 const { email } = req.query;
@@ -921,7 +1027,7 @@ async function run() {
             }
         });
 
-        
+
 
 
         // await client.db("admin").command({ ping: 1 });
