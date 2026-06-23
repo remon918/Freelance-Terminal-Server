@@ -7,6 +7,7 @@ app.use(cors())
 app.use(express.json())
 
 const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
+const { createRemoteJWKSet, jwtVerify } = require('jose-cjs');
 
 app.get('/', (req, res) => {
     res.send('Hello World!')
@@ -22,6 +23,32 @@ const client = new MongoClient(uri, {
     }
 });
 
+
+const verifyToken = (req, res, next) => {
+    const authHeader = req?.headers.authorization
+    console.log(authHeader)
+    if (!authHeader) {
+        return res.status(401).json({ message: "Unauthorized" })
+    }
+    const token = authHeader.split(" ")[1]
+    console.log(token)
+    if (!token) {
+        return res.status(401).json({ message: "Unauthorized" })
+    }
+
+    try {
+        const { payload } = jwtVerify(token, JWKS)
+        console.log(payload)
+        next()
+    } catch (error) {
+        return res.status(403).json({message: "Forbidden"})
+    }
+}
+
+const JWKS = createRemoteJWKSet(
+    new URL(`${process.env.CLIENT_URL}/api/auth/jwks`)
+);
+
 async function run() {
     try {
         // Connect the client to the server	(optional starting in v4.7)
@@ -32,7 +59,7 @@ async function run() {
         const paymentCollection = database.collection("payment")
 
 
-        app.get("/api/admin/users", async (req, res) => {
+        app.get("/api/admin/users", verifyToken , async (req, res) => {
             try {
                 // এখানে সব ইউজার ব্যাক করবে (সিকিউরিটির জন্য পাসওয়ার্ড বাদ দেওয়া হয়েছে)
                 const users = await usersCollection.find({}, { projection: { password: 0 } }).toArray();
@@ -44,7 +71,7 @@ async function run() {
         });
 
 
-        app.patch("/api/admin/users/:id/status", async (req, res) => {
+        app.patch("/api/admin/users/:id/status", verifyToken , async (req, res) => {
             try {
                 const { id } = req.params;
                 const { status } = req.body; // ফ্রন্টএন্ড থেকে 'Active' অথবা 'Blocked' আসবে
@@ -77,7 +104,7 @@ async function run() {
             }
         });
 
-        app.get("/api/admin/tasks", async (req, res) => {
+        app.get("/api/admin/tasks",verifyToken, async (req, res) => {
             try {
                 // সরাসরি কালেকশন থেকে সব টাস্ক খুঁজে নেওয়া (কোনো ডুপ্লিকেট তৈরি হবে না)
                 const tasks = await tasksCollection.find({}).sort({ createdAt: -1 }).toArray();
@@ -120,7 +147,7 @@ async function run() {
             }
         });
 
-        app.delete("/api/admin/tasks/:id", async (req, res) => {
+        app.delete("/api/admin/tasks/:id", verifyToken , async (req, res) => {
             try {
                 const { id } = req.params;
                 if (!ObjectId.isValid(id)) {
@@ -205,7 +232,7 @@ async function run() {
             }
         });
 
-        app.get("/api/payment-history", async (req, res) => {
+        app.get("/api/payment-history", verifyToken , async (req, res) => {
             try {
                 const { email } = req.query;
                 if (!email) {
@@ -270,7 +297,7 @@ async function run() {
             }
         });
 
-        app.get("/api/freelancer-earnings", async (req, res) => {
+        app.get("/api/freelancer-earnings", verifyToken , async (req, res) => {
             try {
                 const { email } = req.query;
                 if (!email) {
@@ -350,7 +377,7 @@ async function run() {
 
 
 
-        app.get("/api/freelancers/:id", async (req, res) => {
+        app.get("/api/freelancers/:id", verifyToken , async (req, res) => {
             try {
                 const id = req.params.id;
                 if (!ObjectId.isValid(id)) {
@@ -373,7 +400,7 @@ async function run() {
 
 
 
-        app.put("/api/freelancers/:id", async (req, res) => {
+        app.put("/api/freelancers/:id", verifyToken ,async (req, res) => {
             try {
                 const id = req.params.id;
                 const updatedData = req.body;
@@ -457,7 +484,7 @@ async function run() {
         });
 
         // ১. নির্দিষ্ট ক্লায়েন্টের প্রোফাইল ডেটা রিড করা
-        app.get("/api/clients/:id", async (req, res) => {
+        app.get("/api/clients/:id", verifyToken , async (req, res) => {
             try {
                 const id = req.params.id;
                 if (!ObjectId.isValid(id)) {
@@ -480,7 +507,7 @@ async function run() {
         });
 
         // ২. ক্লায়েন্টের প্রোফাইল আপডেট করা
-        app.put("/api/clients/:id", async (req, res) => {
+        app.put("/api/clients/:id", verifyToken , async (req, res) => {
             try {
                 const id = req.params.id;
                 const updatedData = req.body;
@@ -510,7 +537,7 @@ async function run() {
         });
 
         // ১. নির্দিষ্ট অ্যাডমিনের প্রোফাইল ডেটা রিড করা
-        app.get("/api/admins/:id", async (req, res) => {
+        app.get("/api/admins/:id", verifyToken , async (req, res) => {
             try {
                 const id = req.params.id;
                 if (!ObjectId.isValid(id)) {
@@ -533,7 +560,7 @@ async function run() {
         });
 
         // ২. অ্যাডমিনের প্রোফাইল ডেটা আপডেট করা
-        app.put("/api/admins/:id", async (req, res) => {
+        app.put("/api/admins/:id", verifyToken , async (req, res) => {
             try {
                 const id = req.params.id;
                 const updatedData = req.body;
@@ -564,7 +591,7 @@ async function run() {
 
 
 
-        app.get("/api/tasks/:id", async (req, res) => {
+        app.get("/api/tasks/:id",  async (req, res) => {
             try {
                 const id = req.params.id;
 
@@ -698,7 +725,7 @@ async function run() {
             }
         });
 
-        app.get("/api/my-tasks", async (req, res) => {
+        app.get("/api/my-tasks", verifyToken , async (req, res) => {
             const { clientId } = req.query;
             if (!clientId) {
                 return res.status(400).send({
@@ -791,7 +818,7 @@ async function run() {
             }
         });
 
-        app.post("/api/tasks", async (req, res) => {
+        app.post("/api/tasks", verifyToken , async (req, res) => {
             try {
                 const task = req.body;
 
@@ -825,7 +852,7 @@ async function run() {
             }
         });
 
-        app.get("/api/my-proposals", async (req, res) => {
+        app.get("/api/my-proposals", verifyToken , async (req, res) => {
             try {
                 const { email } = req.query;
 
@@ -862,7 +889,7 @@ async function run() {
             }
         });
 
-        app.post("/api/proposals", async (req, res) => {
+        app.post("/api/proposals", verifyToken, async (req, res) => {
             try {
                 const { taskId, proposedBudget, estimatedDays, coverNote, freelancerEmail } = req.body;
                 const newProposal = {
@@ -883,9 +910,10 @@ async function run() {
             } catch (error) {
                 res.status(500).send({ error: true, message: "Internal server error" });
             }
-        });
+        }
+        );
 
-        app.put("/api/proposals/:taskId/:proposalId", async (req, res) => {
+        app.put("/api/proposals/:taskId/:proposalId", verifyToken , async (req, res) => {
             try {
                 const { taskId, proposalId } = req.params;
                 const { status } = req.body;
@@ -914,7 +942,7 @@ async function run() {
             }
         });
 
-        app.get("/api/proposals/details/:proposalId", async (req, res) => {
+        app.get("/api/proposals/details/:proposalId", verifyToken , async (req, res) => {
             try {
                 const { proposalId } = req.params;
                 if (!ObjectId.isValid(proposalId)) {
@@ -965,7 +993,7 @@ async function run() {
 
 
 
-        app.get("/api/freelancer-projects", async (req, res) => {
+        app.get("/api/freelancer-projects", verifyToken , async (req, res) => {
             try {
                 const { email } = req.query;
                 if (!email) {
